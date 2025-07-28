@@ -21,7 +21,6 @@ class ResNet2D_block(torch.nn.Module):
     def forward(self, x):
         out = self.net(x)
         return x + out
-D
 
 class RNAranknet1(torch.nn.Module):
     def __init__(self):
