@@ -1,4 +1,4 @@
-# Quality assessment of RNA structure models using deep learning and predicted intermediate 2D maps.
+# Quality assessment of RNA 3D structure models using deep learning and intermediate 2D maps.
 Overview
 ----
 [![Python version](https://img.shields.io/badge/python-3.10%2B-blue?style=flat-square)](https://www.python.org/downloads/)  [![PyTorch version](https://img.shields.io/badge/PyTorch-2.0%2B-red?style=flat-square)](https://pytorch.org/)  [![PyRosetta: 2020+](https://img.shields.io/badge/PyRosetta-2020%2B-green?style=flat-square)](https://www.pyrosetta.org/downloads)
