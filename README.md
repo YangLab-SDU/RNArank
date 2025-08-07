@@ -79,11 +79,11 @@ If you use RNArank in your research or work, please cite our publication:
 
 ```
 @article {Liu2025RNArank,
-	title = {Quality assessment of RNA structure models using deep learning and predicted intermediate 2D maps.},
+	title = {Quality assessment of RNA structure models using deep learning and predicted intermediate 2D maps},
 	author = {Xiaocheng Liu, Wenkai Wang, Zongyang Du, Ziyi Wang, Zhenling Peng and Jianyi Yang},
 	journal = {bioRxiv},
 	year = {2025},
-	doi = {}
+	doi = {10.1101/2025.07.25.666746}
 }
 ```
 
