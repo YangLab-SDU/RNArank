@@ -103,69 +103,65 @@ def energy_maps(pdict):
                     tensor[index, ii - 1, jj - 1] = score
     pdict['energy'] = tensor
 
-def extract_clash(pdict):
-    radius = {'C': 1.7, 'N': 1.55, 'O': 1.52, 'P': 1.8, }
+def extract_clash(pdict, clash_buffer=0.4):
+    radius = {'C': 1.7, 'N': 1.55, 'O': 1.52, 'P': 1.8}
     pose = pdict['pose']
     nres = pdict['nres']
-    atom_name_list = []
+
     atom_xyz_list = []
-    bonding_list = []
-    residue_idx_list = []
+    atom_radii = []
+    residue_start_idx = []
+    bonding_pairs = []
+
     idx = 0
     for i in range(1, nres + 1):
-        residue_idx_list.append([i, idx])
+        residue_start_idx.append(idx)
         r = pose.residue(i)
-        O3_idx = None
-        P_idx = None
+        O3_idx, P_idx = None, None
         for j in range(1, r.natoms() + 1):
             atom_name = r.atom_name(j).strip()
-            if atom_name[0] in ["C", "N", "O", "P"]:
-                idx += 1
-                atom_name_list.append([i, atom_name, atom_name[0], radius[atom_name[0]]])
+            if atom_name[0] in radius:
                 atom_xyz_list.append(np.array(r.atom(j).xyz()))
-                if atom_name == "O3\'":
-                    O3_idx = idx
+                atom_radii.append(radius[atom_name[0]])
+                idx += 1
+                if atom_name == "O3'":
+                    O3_idx = idx - 1
                 if atom_name == "P":
-                    P_idx = idx
-        bonding_list.append([O3_idx, P_idx])
-    residue_idx_list = np.array(residue_idx_list)
-    atom_xyz_list = np.array(atom_xyz_list)
-    atom_name_list = np.array(atom_name_list)
-    bonding_list = np.array(bonding_list)
+                    P_idx = idx - 1
+        bonding_pairs.append([O3_idx, P_idx])
+    residue_start_idx.append(idx)
 
-    dis = distance.cdist(atom_xyz_list, atom_xyz_list, 'euclidean')
-    dis_threshold = np.zeros_like(dis)
-    for i in range(dis_threshold.shape[0]):
-        for j in range(dis_threshold.shape[0]):
-            dis_threshold[i, j] = float(atom_name_list[i, 3]) + float(atom_name_list[j, 3]) - 0.4
+    atom_xyz = np.array(atom_xyz_list)
+    atom_radii = np.array(atom_radii)
+    bonding_pairs = np.array(bonding_pairs, dtype=object)
+
+    dis = distance.cdist(atom_xyz, atom_xyz, 'euclidean')
+
+    dis_threshold = atom_radii[:, None] + atom_radii[None, :] - clash_buffer
+
     clash_1hot = dis < dis_threshold
     np.fill_diagonal(clash_1hot, False)
-    for i in range(bonding_list.shape[0] - 1):
-        clash_1hot[bonding_list[i, 0], bonding_list[i + 1, 1]] = False
-    for i in range(residue_idx_list.shape[0]):
-        start_idx = residue_idx_list[i, 1]
-        if i < residue_idx_list.shape[0] - 1:
-            end_idx = residue_idx_list[i + 1, 1]
-        else:
-            end_idx = clash_1hot.shape[0]
-        clash_1hot[start_idx:end_idx, start_idx:end_idx] = False
-    clash_num = np.zeros((residue_idx_list.shape[0], residue_idx_list.shape[0]))
-    atom_num = np.zeros((residue_idx_list.shape[0], residue_idx_list.shape[0]))
-    for i in range(residue_idx_list.shape[0]):
-        start_idx_i = residue_idx_list[i, 1]
-        if i < residue_idx_list.shape[0] - 1:
-            end_idx_i = residue_idx_list[i + 1, 1]
-        else:
-            end_idx_i = clash_1hot.shape[0]
-        for j in range(residue_idx_list.shape[0]):
-            start_idx_j = residue_idx_list[j, 1]
-            if j < residue_idx_list.shape[0] - 1:
-                end_idx_j = residue_idx_list[j + 1, 1]
-            else:
-                end_idx_j = clash_1hot.shape[0]
-            atom_num[i, j] = clash_1hot[start_idx_i:end_idx_i, start_idx_j:end_idx_j].size
-            clash_num[i, j] = np.sum(clash_1hot[start_idx_i:end_idx_i, start_idx_j:end_idx_j])
-    clash_prob = clash_num / atom_num
+
+    for bp in bonding_pairs:
+        if bp[0] is not None and bp[1] is not None:
+            clash_1hot[bp[0], bp[1]] = False
+            clash_1hot[bp[1], bp[0]] = False
+
+    residue_starts = np.array(residue_start_idx)
+    for i in range(nres):
+        s, e = residue_starts[i], residue_starts[i + 1]
+        clash_1hot[s:e, s:e] = False
+
+    clash_prob = np.zeros((nres, nres))
+    for i in range(nres):
+        s_i, e_i = residue_starts[i], residue_starts[i + 1]
+        for j in range(i, nres):
+            s_j, e_j = residue_starts[j], residue_starts[j + 1]
+            block = clash_1hot[s_i:e_i, s_j:e_j]
+            total = block.size
+            num = np.count_nonzero(block)
+            p = num / total if total > 0 else 0.0
+            clash_prob[i, j] = clash_prob[j, i] = p  # 对称
     pdict['clash_prob'] = clash_prob
 
 def extract_USR(pdict):
@@ -226,65 +222,64 @@ def voxelization(path, pdict):
     pixels = pixelate_atoms_in_box(model, pixels, ori, frame_C4_)
     pdict['pixels'] = pixels
 
-def get_f2d(msa):
-    nrow, ncol = msa.shape[-2:]
-    if nrow == 1:
-        msa = np.repeat(msa.reshape(nrow, ncol), 2, axis=0)
-        nrow = 2
-    msa1hot = (np.arange(5) == msa[..., None]).astype(float)  # (h, L, 5)
-    w = reweight(msa1hot, .8)
-    f1d_seq = msa1hot[0, :, :4]  # (L, 4)
-    f1d_pssm = msa2pssm(msa1hot, w)  # (L, 6)
-    f1d = np.concatenate([f1d_seq, f1d_pssm], axis=1)
-    f2d_dca = fast_dca(msa1hot, w)  # (L, L, 26)
-    f2d = np.concatenate([f1d[:, None, :].repeat(ncol, axis=1), f1d[None, :, :].repeat(ncol, axis=0), f2d_dca], axis=-1)
-
-    return f1d, f2d
-
-def reweight(msa1hot, cutoff):
-    id_min = msa1hot.shape[1] * cutoff
-    id_mtx = np.tensordot(msa1hot, msa1hot, axes=([1, 2], [1, 2]))
-    id_mask = id_mtx > id_min
-    w = 1.0 / id_mask.sum(axis=-1).astype(float)
-
-    return w
-
-def msa2pssm(msa1hot, w):
-    beff = w.sum()
-    f_i = (w[:, None, None] * msa1hot).sum(axis=0) / beff + 1e-9
-    h_i = (-f_i * np.log(f_i)).sum(axis=1)
-
-    return np.concatenate([f_i, h_i[:, None]], axis=1)
-
-def fast_dca(msa1hot, weights, penalty=4.5):
-    nr, nc, ns = msa1hot.shape
-    x = msa1hot.reshape(nr, nc * ns)
-    num_points = weights.sum() - np.sqrt(weights.mean())
-    mean = (x * weights[:, None]).sum(axis=0, keepdims=True) / num_points
-    x = (x - mean) * np.sqrt(weights[:, None])
-    cov = np.matmul(x.T, x) / num_points
-    cov_reg = cov + np.eye(nc * ns) * penalty / np.sqrt(weights.sum())
-    inv_cov = np.linalg.inv(cov_reg)
-    x1 = inv_cov.reshape(nc, ns, nc, ns)
-    x2 = x1.transpose(0, 2, 1, 3)
-    features = x2.reshape(nc, nc, ns * ns)
-    x3 = np.sqrt((x1[:, :-1, :, :-1] ** 2).sum(axis=(1, 3))) * (1 - np.eye(nc))
-    apc = x3.sum(axis=0, keepdims=True) * x3.sum(axis=1, keepdims=True) / x3.sum()
-    contacts = (x3 - apc) * (1 - np.eye(nc))
-
-    return np.concatenate([features, contacts[:, :, None]], axis=2)
-
 def pose2fd(pdict):
     mapping = {'RAD': 0, 'URA': 1, 'RCY': 2, 'RGU': 3}
     nucles = []
     length = int(pdict['pose'].total_residue())
     for i in range(length):
-        index1 = i + 1
-        nt_name = pdict['pose'].residue(index1).name().split(":")[0].split("_")[0]
+        nt_name = pdict['pose'].residue(i + 1).name().split(":")[0].split("_")[0]
         nucles.append(mapping[nt_name])
-    nucles = np.array(nucles, dtype=np.uint8)[None, :]
-    f1d_nucles, f2d_nucles = get_f2d(nucles)
-    return f1d_nucles, f2d_nucles
+    nucles = np.array(nucles, dtype=np.uint8)[None, :]  # (1, L)
+    f1d, f2d = get_f2d_single(nucles)
+    return f1d, f2d
+
+def get_f2d_single(msa):
+    _, ncol = msa.shape
+    L = ncol
+    ns = 5
+
+    msa1hot_4ch = (np.arange(4) == msa[..., None]).astype(float)[0]  # (L, 4)
+    f1d_seq = msa1hot_4ch
+
+    f_i_5ch = np.pad(f1d_seq, ((0, 0), (0, 1)), 'constant')  # (L, 5)
+    h_i = np.zeros((L, 1))
+    f1d_pssm = np.concatenate([f_i_5ch, h_i], axis=1)  # (L, 6)
+
+    f1d = np.concatenate([f1d_seq, f1d_pssm], axis=1)  # (L, 10)
+    penalty = 4.5
+    weights = np.array([0.5, 0.5])
+    num_points = weights.sum() - np.sqrt(weights.mean())  # 1.0 - sqrt(0.5)
+
+    x_flat = f_i_5ch.reshape(L * ns)
+    mean = x_flat[None, :] / num_points
+
+    v = (x_flat - mean) * np.sqrt(weights[0])
+    v = v.flatten()
+
+    alpha = 2.0 / num_points
+    beta = penalty / np.sqrt(weights.sum())  # beta = penalty
+
+    vTv = np.dot(v, v)
+    c1 = 1.0 / beta
+    c2 = alpha / (beta ** 2 + beta * alpha * vTv)
+
+    inv_cov_flat = -c2 * np.outer(v, v)
+    diag_indices = np.arange(L * ns)
+    inv_cov_flat[diag_indices, diag_indices] += c1
+
+    x1 = inv_cov_flat.reshape(L, ns, L, ns)
+    x2 = x1.transpose(0, 2, 1, 3)
+    features = x2.reshape(L, L, ns * ns)
+
+    x3 = np.sqrt((x1[:, :-1, :, :-1] ** 2).sum(axis=(1, 3))) * (1 - np.eye(L))
+    apc = x3.sum(axis=0, keepdims=True) * x3.sum(axis=1, keepdims=True) / x3.sum()
+    contacts = (x3 - apc) * (1 - np.eye(L))
+
+    f2d_dca = np.concatenate([features, contacts[:, :, None]], axis=2)  # (L, L, 26)
+
+    f2d = np.concatenate([f1d[:, None, :].repeat(L, axis=1), f1d[None, :, :].repeat(L, axis=0), f2d_dca], axis=-1)
+
+    return f1d, f2d
 
 def ExtractFeature(args):
     output = args.output
