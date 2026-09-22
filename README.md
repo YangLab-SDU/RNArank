@@ -18,7 +18,7 @@ Starting from an RNA structure in PDB format, the RNArank pipeline comprises the
 2. **Map Prediction**: A Y-shaped network processes these multi-dimensional features to predict intermediate contact and deviation maps.
 3. **Score Calculation**: The predicted maps are used to derive a per-residue predicted lDDT (pLDDT) score, which reflects the local accuracy of the model.
 
-[//]: # (We also establish a user-friendly [webserver]&#40;https://yanglab.qd.sdu.edu.cn/RNArank/&#41; for RNArank.)
+RNArank is also available as a user-friendly [web server](https://yanglab.qd.sdu.edu.cn/RNArank/).
 
 Installation
 ----
